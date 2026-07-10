@@ -1,0 +1,50 @@
+Bootstrap: docker
+From: pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel
+
+%environment
+    export TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9+PTX"
+    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
+    export CMAKE_PREFIX_PATH="/opt/conda"
+    export FORCE_CUDA="1"
+    export PATH="/opt/conda/bin:/usr/bin:/usr/local/bin:$PATH"
+    export LD_LIBRARY_PATH="/opt/conda/lib:$LD_LIBRARY_PATH"
+    export PYTHONPATH="/S4Former:$PYTHONPATH"
+
+%files
+    /arf/scratch/bgorgun/S4Former /S4Former
+
+%post
+    set -e
+    export PATH="/opt/conda/bin:/usr/bin:/usr/local/bin:$PATH"
+
+    /opt/conda/bin/conda clean --all -y
+
+    # opencv-python-headless ile libXau sorununu atla
+    /opt/conda/bin/pip uninstall -y opencv-python || true
+    /opt/conda/bin/pip install --no-cache-dir opencv-python-headless
+
+    # Sistem kütüphaneleri
+    /opt/conda/bin/conda install -y -c conda-forge \
+        ninja libxau libxext libxrender libsm libgl && \
+    /opt/conda/bin/conda clean --all -y
+
+    # Install MMCV
+    /opt/conda/bin/pip install --no-cache-dir mmcv-full==1.4.0 \
+        -f https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/index.html
+
+    # S4Former dependencies
+    /opt/conda/bin/pip install --no-cache-dir timm einops
+
+    cd /S4Former
+    if [ -f requirements.txt ]; then
+        /opt/conda/bin/pip install --no-cache-dir -r requirements.txt
+    fi
+
+%runscript
+    cd /S4Former
+    exec "$@"
+
+%labels
+    PyTorch 1.11.0
+    CUDA 11.3
+    GPU H200
