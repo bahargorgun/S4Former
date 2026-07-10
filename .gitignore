@@ -1,0 +1,41 @@
+# Data - BraTS verisi GitHub'a gitmez
+data/BraTS2023/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/
+data/BraTS2023/ASNR-MICCAI-BraTS2023-GLI-Challenge-ValidationData/
+data/VOCdevkit/VOC2012/JPEGImages/
+data/VOCdevkit/VOC2012/SegmentationClass/
+data/VOCdevkit/VOC2012/Annotations/
+
+# Model checkpoints - 1.1GB dosyalar
+work_dirs/
+*.pth
+
+# Logs
+*.log
+*.log.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Results
+results/pred_*/
+
+# Singularity
+*.sif
+INSTALL/
+
+# Temp
+patches/
+/tmp/

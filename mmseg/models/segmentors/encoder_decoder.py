@@ -92,6 +92,13 @@ class EncoderDecoder(BaseSegmentor):
                  unimatch=False,
                  fdrop_loss_weight=0.5,
                  use_cutmix_adaptive=False,
+                 num_classes=21,
+                 # UAPR + Adaptive Threshold
+                 use_uapr=False,
+                 uapr_n_samples=10,
+                 uapr_dropout_p=0.3,
+                 use_adaptive_threshold=False,
+                 class_thresholds=None,
                  ):
         super(EncoderDecoder, self).__init__(init_cfg)
         if pretrained is not None:
@@ -117,7 +124,19 @@ class EncoderDecoder(BaseSegmentor):
         self.momentum = ema_momentum
         self.attn_frozen = attn_frozen
         self.attn_frozen_rate = attn_frozen_rate
+        self.num_classes = num_classes
         self.use_fdrop = use_fdrop
+        # UAPR
+        self.use_uapr = use_uapr
+        if use_uapr:
+            from mmseg.models.utils.uapr import UAPRModule
+            self.uapr = UAPRModule(n_samples=uapr_n_samples, dropout_p=uapr_dropout_p)
+        # Adaptive Threshold
+        self.use_adaptive_threshold = use_adaptive_threshold
+        if use_adaptive_threshold:
+            from mmseg.models.utils.uapr import ClassAdaptiveThreshold
+            self.adaptive_threshold = ClassAdaptiveThreshold(
+                num_classes=self.num_classes, class_thresholds=class_thresholds)
         self.mix_with_labeled = mix_with_labeled
 
         if momentum_backbone is not None:
@@ -624,7 +643,22 @@ class EncoderDecoder(BaseSegmentor):
                 confidence
             )
             student_info["img"] = student_imgs
-            label_u_aug[logits_u_aug<self.unsup_confidence]=255
+            # UZANTI 2: UAPR - uncertainty weight hesapla
+            if self.use_uapr:
+                self.uapr.train()
+                uncertainty_weight, mean_probs = self.uapr(
+                    logits_u_aug.detach().unsqueeze(0).squeeze(0))
+                teacher_info['uncertainty_weight'] = uncertainty_weight
+                probs_for_threshold = mean_probs
+            else:
+                probs_for_threshold = torch.softmax(logits_u_aug, dim=1)
+
+            # UZANTI 3: Adaptive Threshold - sınıf bazlı eşik
+            if self.use_adaptive_threshold:
+                conf_mask, label_u_aug = self.adaptive_threshold.get_mask(probs_for_threshold)
+                teacher_info['conf_mask'] = conf_mask
+            else:
+                label_u_aug[logits_u_aug < self.unsup_confidence] = 255
             teacher_info['hard_seg_label'] = label_u_aug
         if self.use_PatchShuffle:
             student_info, teacher_info = generate_unsup_patchmix_data(student_info, teacher_info, 
@@ -930,7 +964,12 @@ class EncoderDecoder(BaseSegmentor):
                 self.momentum_head = mask_ratio**self.momentum_exp
                 self.momentum_backbone = mask_ratio**self.momentum_exp
                 loss_unsup['momentum_head'] = self.momentum_head
-        loss = torch.mean(loss * mask.to(student_info["img"].device))
+        # UZANTI 2: UAPR uncertainty weight'i loss'a uygula
+        if self.use_uapr and 'uncertainty_weight' in teacher_info:
+            uw = teacher_info['uncertainty_weight'].to(student_info["img"].device)
+            loss = torch.mean(loss * mask.to(student_info["img"].device) * uw)
+        else:
+            loss = torch.mean(loss * mask.to(student_info["img"].device))
         loss_unsup['loss_seg_unsup'] = loss
 
         if self.negative_class_ranking:
@@ -1123,7 +1162,7 @@ class EncoderDecoder(BaseSegmentor):
             if return_last_feat:
                 seg_logit, attn_mask, feat = self.encode_decode(img, img_meta, return_last_feat=True, use_attn_mask=use_attn_mask)
             else:
-                seg_logit = self.encode_decode(img, img_meta, return_last_feat=False)
+                seg_logit = self.encode_decode(img, img_meta, adaptive_attn_mask=None, return_last_feat=False)
         if rescale:
             # support dynamic shape for onnx
             if torch.onnx.is_in_onnx_export():

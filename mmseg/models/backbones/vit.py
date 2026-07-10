@@ -547,10 +547,21 @@ class VisionTransformer(BaseModule):
                 if self.final_norm:
                     x = self.norm1(x)
             if i in self.out_indices:
-                self_attn = layer.attn.self_attn
-                if self.with_cls_token:
-                    self_attn = self_attn[:,1:,1:]  # [bs, patch_num, patch_num]
-                multi_self_attn.append(self_attn)
+                # Capture attention weights via hook
+                attn_weights = [None]
+                def _hook(module, input, output):
+                    attn_weights[0] = output[1]
+                handle = layer.attn.attn.register_forward_hook(_hook)
+                with torch.no_grad():
+                    layer.attn(x, x, x)
+                handle.remove()
+                self_attn = attn_weights[0]
+                if self_attn is not None and self.with_cls_token:
+                    self_attn = self_attn[:,1:,1:]
+                if self_attn is not None:
+                    multi_self_attn.append(self_attn)
+                else:
+                    multi_self_attn.append(torch.zeros(1))
 
                 if self.with_cls_token:
                     out = x[:, 1:]

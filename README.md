@@ -1,100 +1,189 @@
-## Introduction
+# S4Former for Brain Tumor Segmentation
 
-This is the repo for our CVPR2024 paper "Training Vision Transformers for Semi-Supervised Semantic Segmentation".
+This repository extends [S4Former](https://github.com/JoyHuYY1412/S4Former) — a Vision Transformer-based semi-supervised semantic segmentation framework — for multi-modal brain tumor segmentation on the **BraTS 2023 GLI** dataset.
 
-## Setup
+Original paper: [Training Vision Transformers for Semi-Supervised Semantic Segmentation (CVPR 2024)](https://arxiv.org/abs/2405.02286)
 
-Please refer to [get_started.md](docs/en/get_started.md#installation) for MMSegmentation environments installation and [dataset_prepare.md](docs/en/dataset_prepare.md#prepare-datasets) for Pascal VOC 2012 and Cityscapes datasets preparation. Datasplits for labeled/unlabeled data division have been given under the `data` folder.
+---
 
-## Pre-Training Weight
+## Extensions
 
-#### 1. Download Pre-trained Weights
+Three domain-specific extensions are added on top of the original S4Former:
 
-We recommend using the pre-trained weights provided by OpenMMLab, which are already adapted for MMCV/MMSegmentation.
+### 1. 4-Channel MRI Domain Adaptation
+The original framework expects 3-channel RGB images. BraTS provides four MRI modalities — T1n, T1c, T2w, and T2 FLAIR — each revealing different tumor sub-regions. The patch embedding layer is modified to accept `in_channels=4`, and the EMA teacher backbone and decoder head are updated accordingly.
 
-- **DeiT-Base (Patch16, ImageNet-1k)**  
-  Download link:  [deit-base_pt-16xb64_in1k_20220216-db63c16c.pth](https://download.openmmlab.com/mmclassification/v0/deit/deit-base_pt-16xb64_in1k_20220216-db63c16c.pth)
+A new `BraTSDataset` class handles NIfTI file loading, per-modality z-score normalization, and 2D axial slice extraction.
 
-**After downloading, rename it to:**
+### 2. Uncertainty-Aware Pseudo-Label Refinement (UAPR)
+The original S4Former filters pseudo-labels with a fixed softmax confidence threshold (β=0.95). Softmax probabilities can be overconfident, especially at tumor boundaries. UAPR replaces this with Monte Carlo Dropout-based epistemic uncertainty estimation: the teacher model runs N=10 stochastic forward passes, and pixels with high prediction variance are down-weighted in the unsupervised loss.
 
-```bash
-deit_base_p16.pth
+### 3. Class-Adaptive Thresholding (CAT)
+BraTS has severe class imbalance — the enhancing tumor (ET) can occupy less than 1% of voxels. A global threshold of 0.95 almost never selects ET as a pseudo-label. CAT replaces the single threshold with per-class thresholds tuned inversely to class frequency:
+
+| Class | Label | Threshold |
+|-------|-------|-----------|
+| Background | 0 | 0.95 |
+| ED (Edema) | 2 | 0.80 |
+| NCR (Necrotic Core) | 1 | 0.75 |
+| ET (Enhancing Tumor) | 3 | 0.70 |
+
+---
+
+## Results
+
+All experiments use a clean 80/20 train/test split (seed=42, 1,001 train / 250 test patients).
+
+| Split | Method | NCR IoU | ED IoU | ET IoU | mIoU |
+|-------|--------|---------|--------|--------|------|
+| 1/16 | S4Former-Base (BraTS) | 42.43 | 58.96 | 56.37 | 64.27 |
+| 1/16 | **UAPR + CAT (Ours)** | **42.93** | 58.86 | **56.47** | **64.39** |
+| 1/8  | S4Former-Base (BraTS) | 55.58 | **63.30** | 58.21 | 69.12 |
+| 1/8  | **UAPR + CAT (Ours)** | **55.62** | 63.27 | **58.80** | **69.17** |
+
+---
+
+## Dataset
+
+**BraTS 2023 GLI** — 1,251 pre-operative multi-parametric MRI scans with four modalities (T1n, T1c, T2w, T2 FLAIR). Labels: Background (0), NCR (1), ED (2), ET (3).
+
+Download requires registration at [Synapse](https://www.synapse.org/):
+```python
+import synapseclient
+syn = synapseclient.Synapse()
+syn.login(authToken='YOUR_TOKEN')
+syn.get('syn51514132', downloadLocation='data/BraTS2023')  # Training
+syn.get('syn51514110', downloadLocation='data/BraTS2023')  # Validation
 ```
 
-#### 2. Place the Weights
-
-Put the weight file under the `pretrain/` directory:
-
-~~~
-project_root/
-│── pretrain/
-│    └── deit_base_p16.pth
-│── configs/
-│── mmseg/
-│── tools/
-~~~
-
-#### 3. Convert the Weight Format (if needed)
-
-In some cases, the key names of the pre-trained weights may not fully match the current implementation.
- If you encounter `unexpected key(s) in state_dict` or `missing key(s)` errors,
- please run the following script to convert the weight format:
-
-~~~python
-import torch
-
-# 1. Load mmcls DeiT weights
-ckpt = torch.load("pretrain/deit_base_p16.pth", map_location="cpu")
-state_dict = ckpt.get("state_dict", ckpt)
-
-new_state_dict = {}
-for k, v in state_dict.items():
-    new_k = k
-    # remove "backbone." prefix
-    if new_k.startswith("backbone."):
-        new_k = new_k.replace("backbone.", "")
-    # attention qkv mapping
-    if "attn.qkv.weight" in new_k:
-        new_k = new_k.replace("attn.qkv.weight", "attn.attn.in_proj_weight")
-    if "attn.qkv.bias" in new_k:
-        new_k = new_k.replace("attn.qkv.bias", "attn.attn.in_proj_bias")
-    if "attn.proj.weight" in new_k:
-        new_k = new_k.replace("attn.proj.weight", "attn.attn.out_proj.weight")
-    if "attn.proj.bias" in new_k:
-        new_k = new_k.replace("attn.proj.bias", "attn.attn.out_proj.bias")
-    new_state_dict[new_k] = v
-
-# 2. Save the converted weights
-torch.save(new_state_dict, "pretrain/deit_base_p16.pth")
-print("Converted and saved: pretrain/deit_base_p16.pth")
-~~~
-
-
-
-
-## Running Example
-We run our S<sup>4</sup>Former based on the segmentation network of SegFormer([paper](https://arxiv.org/abs/2105.15203)|[project](https://github.com/open-mmlab/mmsegmentation/tree/master/configs/segformer)). The batch size is set to 8 for both labeled images and unlabeled images. Here we take 1/8 labeled data protocal on Pascal VOC 2012 as the example.
-
-### Supervised-Only 
+After downloading, create data splits:
 ```bash
-# use torch.distributed.launch
-sh ./tools/dist_train.sh \
-configs/setr/setr_deit-base_pup_bs_8_512x512_80k_pascal_1over16_split_classic_sup.py 2 \
---seed 1999 
-```
-### Mean Teacher Baseline
-```bash
-# use torch.distributed.launch
-sh ./tools/dist_train.sh \
-configs/setr/setr_deit-base_pup_bs_8_512x512_80k_pascal_1over16_split_classic_semi_beta_1_th_0.95_MT.py 2 \
---seed 1999 
-```
-### S<sup>4</sup>Former (Ours)
-```bash
-# use torch.distributed.launch
-sh ./tools/dist_train.sh \
-configs/setr/setr_deit-base_pup_bs_8_512x512_80k_pascal_1over16_split_classic_semi_beta_1_th_0.95_MT_w_ours.py 2 \
---seed 1999 
+python tools/create_brats_splits.py \
+    --data_root data/BraTS2023/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData \
+    --split_dir data/BraTS2023/splits \
+    --seed 42
 ```
 
-We thank so much for the feedbacks and updates made by Shun Zuo. 
+Expected structure:
+```
+data/BraTS2023/
+├── ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/
+│   ├── BraTS-GLI-00000-000/
+│   │   ├── BraTS-GLI-00000-000-t1n.nii.gz
+│   │   ├── BraTS-GLI-00000-000-t1c.nii.gz
+│   │   ├── BraTS-GLI-00000-000-t2w.nii.gz
+│   │   ├── BraTS-GLI-00000-000-t2f.nii.gz
+│   │   └── BraTS-GLI-00000-000-seg.nii.gz
+│   └── ...
+└── splits/
+    ├── new_1over8_supervised.txt
+    ├── new_1over8_unsupervised.txt
+    ├── new_1over16_supervised.txt
+    ├── new_1over16_unsupervised.txt
+    └── new_test.txt
+```
+
+---
+
+## Installation
+
+```bash
+# Clone the repo
+git clone https://github.com/YOUR_USERNAME/S4Former.git
+cd S4Former
+
+# Install dependencies (Python 3.8, CUDA 11.3)
+pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 \
+    --extra-index-url https://download.pytorch.org/whl/cu113
+
+pip install mmcv-full==1.6.0 -f \
+    https://download.openmmlab.com/mmcv/dist/cu113/torch1.12.0/index.html
+
+pip install -e .
+pip install nibabel
+```
+
+Download pretrained DeiT-Base weights:
+```bash
+mkdir pretrain
+wget https://download.openmmlab.com/mmclassification/v0/deit/deit-base_pt-16xb64_in1k_20220216-db63c16c.pth \
+    -O pretrain/deit_base_p16_raw.pth
+
+# Convert weight format
+python tools/convert_deit_weights.py \
+    --input pretrain/deit_base_p16_raw.pth \
+    --output pretrain/deit_base_p16.pth
+```
+
+---
+
+## Training
+
+**BraTS 1/8 labeled — with UAPR + CAT:**
+```bash
+bash tools/dist_train.sh \
+    configs/brats/s4former_brats_1over8_new_ours.py \
+    1 --seed 1999
+```
+
+**BraTS 1/8 labeled — baseline (domain adaptation only):**
+```bash
+bash tools/dist_train.sh \
+    configs/brats/s4former_brats_1over8_new_baseline.py \
+    1 --seed 1999
+```
+
+**BraTS 1/16 labeled:**
+```bash
+bash tools/dist_train.sh \
+    configs/brats/s4former_brats_1over16_new_ours.py \
+    1 --seed 1999
+```
+
+> **Note:** The S4Former container is incompatible with H100 GPUs due to NCCL/CUDA version mismatches. Run on A100 GPUs.
+
+---
+
+## Evaluation
+
+```bash
+python tools/test.py \
+    configs/brats/s4former_brats_1over8_new_ours.py \
+    work_dirs/s4former_brats_1over8_new_ours_seed_1999/latest.pth \
+    --eval mIoU
+```
+
+---
+
+## Modified Files
+
+| File | Change |
+|------|--------|
+| `mmseg/datasets/brats.py` | New — BraTS NIfTI dataset loader |
+| `mmseg/datasets/__init__.py` | Register `BraTSDataset` |
+| `mmseg/models/utils/uapr.py` | New — `UAPRModule` + `ClassAdaptiveThreshold` |
+| `mmseg/models/segmentors/encoder_decoder.py` | Integrate UAPR + adaptive threshold |
+| `mmseg/models/backbones/vit.py` | Fix attention weight extraction (forward hook) |
+| `mmseg/utils/__init__.py` | Export `generate_unsup_patchmix_data` |
+| `configs/brats/` | New BraTS config files |
+
+---
+
+## Citation
+
+If you use this work, please cite the original S4Former paper:
+
+```bibtex
+@inproceedings{hu2024s4former,
+  title={Training Vision Transformers for Semi-Supervised Semantic Segmentation},
+  author={Hu, Xinting and Jiang, Li and Schiele, Bernt},
+  booktitle={CVPR},
+  year={2024}
+}
+```
+
+---
+
+## Acknowledgements
+
+Built on top of [S4Former](https://github.com/JoyHuYY1412/S4Former) and [MMSegmentation](https://github.com/open-mmlab/mmsegmentation).

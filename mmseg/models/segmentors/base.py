@@ -83,19 +83,11 @@ class BaseSegmentor(BaseModule, metaclass=ABCMeta):
                              f'num of image meta ({len(img_metas)})')
         # all images in the same aug batch all of the same ori_shape and pad
         # shape
-        for img_meta in img_metas:
-            ori_shapes = [_[0]['ori_shape'] for _ in img_meta._data]
-            assert all(shape == ori_shapes[0] for shape in ori_shapes)
-            img_shapes = [_[0]['img_shape'] for _ in img_meta._data]
-            assert all(shape == img_shapes[0] for shape in img_shapes)
-            pad_shapes = [_[0]['pad_shape'] for _ in img_meta._data]
-            assert all(shape == pad_shapes[0] for shape in pad_shapes)
-
         if num_augs == 1:
-            return self.simple_test(imgs[0], img_metas[0]._data[0], **kwargs)
+            meta0 = img_metas[0]._data[0] if hasattr(img_metas[0], '_data') else img_metas[0]
+            return self.simple_test(imgs[0], meta0, **kwargs)
         else:
-            # import pdb; pdb.set_trace()
-            img_metas = [img_meta_i._data[0] for img_meta_i in img_metas]
+            img_metas = [m._data[0] if hasattr(m, '_data') else m for m in img_metas]
             return self.aug_test(imgs, img_metas, **kwargs)
 
 
@@ -194,7 +186,7 @@ class BaseSegmentor(BaseModule, metaclass=ABCMeta):
         with open('outputfile', 'w') as fout:
             json.dump(img_metas, fout)
         
-        data_batch['iter'] = kwargs['iter']
+        data_batch['iter'] = kwargs.get('iter', 0)
         losses = self(**data_batch)
         loss, log_vars = self._parse_losses(losses)
 
