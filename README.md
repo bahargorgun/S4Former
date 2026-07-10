@@ -87,33 +87,40 @@ data/BraTS2023/
 
 ## Installation
 
-```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/S4Former.git
-cd S4Former
+### Option 1: Singularity Container (Recommended)
 
-# Install dependencies (Python 3.8, CUDA 11.3)
-pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 \
+A Singularity definition file is provided. Build the container:
+
+```bash
+singularity build --fakeroot INSTALL/s4former.sif s4former.def
+```
+
+> **Note:** The container embeds the S4Former source at build time (`%files` section). Rebuild after code changes, or use bind mounts to override files at runtime.
+
+Run with bind mounts to use local code changes without rebuilding:
+
+```bash
+singularity exec --nv \
+    -B /path/to/S4Former/mmseg:/S4Former/mmseg \
+    INSTALL/s4former.sif \
+    bash tools/dist_train.sh configs/brats/s4former_brats_1over8_new_ours.py 1 --seed 1999
+```
+
+> **GPU Compatibility:** The container (PyTorch 1.11, CUDA 11.3) is **incompatible with H100 GPUs** due to NCCL version mismatches. Use **A100 GPUs**.
+
+### Option 2: Manual Installation
+
+```bash
+pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 \
     --extra-index-url https://download.pytorch.org/whl/cu113
 
-pip install mmcv-full==1.6.0 -f \
-    https://download.openmmlab.com/mmcv/dist/cu113/torch1.12.0/index.html
+pip install mmcv-full==1.4.0 \
+    -f https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/index.html
 
+pip install timm einops nibabel
 pip install -e .
-pip install nibabel
 ```
 
-Download pretrained DeiT-Base weights:
-```bash
-mkdir pretrain
-wget https://download.openmmlab.com/mmclassification/v0/deit/deit-base_pt-16xb64_in1k_20220216-db63c16c.pth \
-    -O pretrain/deit_base_p16_raw.pth
-
-# Convert weight format
-python tools/convert_deit_weights.py \
-    --input pretrain/deit_base_p16_raw.pth \
-    --output pretrain/deit_base_p16.pth
-```
 
 ---
 
