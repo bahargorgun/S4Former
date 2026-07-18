@@ -2,7 +2,7 @@
 
 This repository extends [S4Former](https://github.com/JoyHuYY1412/S4Former) — a Vision Transformer-based semi-supervised semantic segmentation framework — for multi-modal brain tumor segmentation on the **BraTS 2023 GLI** dataset.
 
-Original paper: [Training Vision Transformers for Semi-Supervised Semantic Segmentation (CVPR 2024)](https://arxiv.org/abs/2405.02286)
+Original paper: [Training Vision Transformers for Semi-Supervised Semantic Segmentation (CVPR 2024)]([https://arxiv.org/abs/2405.02286](https://ieeexplore.ieee.org/document/10656896))
 
 ---
 
